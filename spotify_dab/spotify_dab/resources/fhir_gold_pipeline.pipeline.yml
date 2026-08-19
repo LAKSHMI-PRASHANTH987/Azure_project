@@ -1,0 +1,20 @@
+# DLT pipeline for the FHIR Gold layer.
+# Reads from Silver tables (source_catalog / source_schema pipeline config)
+# and materialises analytics-ready Gold tables.
+
+resources:
+  pipelines:
+    fhir_gold_pipeline:
+      name: fhir_gold_pipeline
+      catalog: ${var.catalog}
+      schema: ${var.schema}_gold
+      serverless: true
+
+      # Pass Silver source coordinates into the DLT notebook via spark.conf
+      configuration:
+        source_catalog: ${var.catalog}
+        source_schema:  ${var.schema}
+
+      libraries:
+        - notebook:
+            path: ../src/fhir/gold/dlt/fhir_gold_dlt

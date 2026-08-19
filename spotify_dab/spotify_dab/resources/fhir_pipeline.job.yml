@@ -1,0 +1,83 @@
+# FHIR Medallion Pipeline
+#
+# Orchestration order:
+#   raw_ingest  (Patient → Encounter → Observation → Condition, sequential inside notebook)
+#       ↓
+#   bronze_all  (all 4 resources, loops internally)
+#       ↓
+#   silver_all  (SCD Type 2 for all resources, loops internally)
+#       ↓
+#   gold_pipeline  (DLT refresh)
+#
+# Parameters:
+#   catalog     – Unity Catalog name
+#   schema      – Schema prefix  (e.g. "fhir")
+#   start_date  – Inclusive start date yyyy-MM-dd
+#   end_date    – Exclusive end date  yyyy-MM-dd
+
+resources:
+  jobs:
+    fhir_medallion_pipeline:
+      name: fhir_medallion_pipeline
+
+      trigger:
+        periodic:
+          interval: 1
+          unit: DAYS
+
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+        - name: schema
+          default: ${var.schema}
+        - name: start_date
+          default: "2024-01-01"
+        - name: end_date
+          default: "2024-01-04"
+
+      tasks:
+        # ── 1. Raw ingestion (all resources, incremental date range) ─────────
+        - task_key: raw_ingest
+          description: "Fetch raw FHIR JSON from HAPI API, store pages on DBFS"
+          notebook_task:
+            notebook_path: ../src/fhir/raw/fhir_raw_ingest
+            base_parameters:
+              catalog:    "{{job.parameters.catalog}}"
+              schema:     "{{job.parameters.schema}}"
+              start_date: "{{job.parameters.start_date}}"
+              end_date:   "{{job.parameters.end_date}}"
+
+        # ── 2. Bronze – all resources ────────────────────────────────────────
+        - task_key: bronze_all
+          description: "Parse raw JSON → Bronze Delta tables (all 4 resources)"
+          depends_on:
+            - task_key: raw_ingest
+          notebook_task:
+            notebook_path: ../src/fhir/bronze/fhir_bronze
+            base_parameters:
+              catalog:    "{{job.parameters.catalog}}"
+              schema:     "{{job.parameters.schema}}"
+              start_date: "{{job.parameters.start_date}}"
+              end_date:   "{{job.parameters.end_date}}"
+
+        # ── 3. Silver SCD2 – all resources ───────────────────────────────────
+        - task_key: silver_all
+          description: "Apply SCD Type 2 merge for all resources over the date range"
+          depends_on:
+            - task_key: bronze_all
+          notebook_task:
+            notebook_path: ../src/fhir/silver/fhir_silver_scd2
+            base_parameters:
+              catalog:    "{{job.parameters.catalog}}"
+              schema:     "{{job.parameters.schema}}"
+              start_date: "{{job.parameters.start_date}}"
+              end_date:   "{{job.parameters.end_date}}"
+
+        # ── 4. Gold DLT pipeline refresh ────────────────────────────────────
+        - task_key: gold_pipeline
+          description: "Refresh Gold DLT tables from Silver"
+          depends_on:
+            - task_key: silver_all
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.fhir_gold_pipeline.id}
+            full_refresh: false

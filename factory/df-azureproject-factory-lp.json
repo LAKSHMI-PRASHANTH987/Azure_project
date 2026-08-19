@@ -1,0 +1,9 @@
+{
+	"name": "df-azureproject-factory-lp",
+	"location": "eastus",
+	"identity": {
+		"type": "SystemAssigned",
+		"principalId": "9d1f9756-e384-4ac7-a324-ad16bccaf3f7",
+		"tenantId": "86741b04-541e-48da-9a68-32f5a76e8c52"
+	}
+}
